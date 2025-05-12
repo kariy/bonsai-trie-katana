@@ -171,7 +171,6 @@ impl<'a, H: StarkHash + Send + Sync, DB: BonsaiDatabase, ID: Id> MerkleTreeItera
             // partition point is a binary search under the hood
             // TODO(perf): measure whether binary search is actually better than reverse iteration - the happy path may be that
             //  only the last few bits are different.
-
             self.current_nodes_heights
                 .partition_point(|(_node, height)| *height < shared_prefix_len)
         };
@@ -187,6 +186,7 @@ impl<'a, H: StarkHash + Send + Sync, DB: BonsaiDatabase, ID: Id> MerkleTreeItera
 
         let mut next_to_visit = if let Some((node_id, height)) = self.current_nodes_heights.pop() {
             self.current_path.truncate(height);
+            visitor.visit_node::<DB>(self.tree, node_id, height)?;
             self.traverse_one(node_id, height, key)?
         } else {
             // Start from tree root.
@@ -196,6 +196,7 @@ impl<'a, H: StarkHash + Send + Sync, DB: BonsaiDatabase, ID: Id> MerkleTreeItera
                 self.leaf_hash = None;
                 return Ok(());
             };
+            visitor.visit_node::<DB>(self.tree, node_id, 0)?;
             Some(node_id)
         };
 
@@ -206,7 +207,6 @@ impl<'a, H: StarkHash + Send + Sync, DB: BonsaiDatabase, ID: Id> MerkleTreeItera
         );
 
         // Tree traversal :)
-
         loop {
             log::trace!("Loop start cur={:?} key={:b}", self.current_path, key);
 
@@ -214,8 +214,10 @@ impl<'a, H: StarkHash + Send + Sync, DB: BonsaiDatabase, ID: Id> MerkleTreeItera
                 return Ok(());
             };
 
-            visitor.visit_node::<DB>(self.tree, node_id, self.current_path.len())?;
             next_to_visit = self.traverse_one(node_id, self.current_path.len(), key)?;
+            if let Some(next_id) = next_to_visit {
+                visitor.visit_node::<DB>(self.tree, next_id, self.current_path.len())?;
+            }
 
             log::trace!(
                 "Got nodeid={:?} height={}, cur path={:?}, next to visit={:?}",
@@ -252,6 +254,8 @@ mod tests {
     //!   0x1    0x2       0x3      0x4        
     //! ```
 
+    use crate::id::BasicIdBuilder;
+    use crate::BitVec;
     use crate::{
         databases::{create_rocks_db, RocksDB, RocksDBConfig},
         id::{BasicId, Id},
@@ -298,6 +302,21 @@ mod tests {
         bonsai_storage
             .insert(&[], bits![u8, Msb0; 0,1,0,0,0,0,0,0], &FOUR)
             .unwrap();
+
+        let mut id_builder = BasicIdBuilder::new();
+        let id1 = id_builder.new_id();
+        // bonsai_storage.commit(id1).unwrap();
+        let mut bv = BitVec::new();
+        bv.extend_from_bitslice(&bits![u8, Msb0; 0,0,0,1,0,0,0,0]);
+        let proof_keys: Vec<BitVec> = vec![bv];
+        let multi_proof = bonsai_storage.get_multi_proof(&[], &proof_keys);
+        println!("Multi proof for node 0x1: {:?}", multi_proof.unwrap());
+
+        let mut bv = BitVec::new();
+        bv.extend_from_bitslice(&bits![u8, Msb0; 0,1,0,0,0,0,0,0]);
+        let proof_keys: Vec<BitVec> = vec![bv];
+        let multi_proof = bonsai_storage.get_multi_proof(&[], &proof_keys);
+        println!("Multi proof for node 0x4: {:?}", multi_proof.unwrap());
 
         bonsai_storage.dump();
 
