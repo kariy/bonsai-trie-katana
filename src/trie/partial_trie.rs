@@ -103,6 +103,10 @@ impl<H: StarkHash + Send + Sync> PartialTrie<H> {
             self.max_height
         );
 
+        // assuming that the provided proof is only for the `key`, then why need to build the trie path
+        // for `key` again? The proof is already the path for `key`. Seems like a redundant step. Ofc, this is
+        // assuming that multiproof ONLY has the proof for `key`.
+
         let mut visitor = NextRootVisitor::<H> {
             path_nodes: Vec::new(),
             current_path: BitVec::new(),
@@ -110,6 +114,7 @@ impl<H: StarkHash + Send + Sync> PartialTrie<H> {
             _hasher: PhantomData,
         };
 
+        // get the trie path for the `key`
         let mut current_felt = current_root;
         loop {
             if visitor.current_path.len() == key.len() {
@@ -549,6 +554,9 @@ mod tests {
         bonsai_storage1.commit(id1).unwrap();
 
         let current_root = bonsai_storage1.root_hash(&identifier1).unwrap();
+        // let proofs0 = bonsai_storage1
+        //     .get_multi_proof(&identifier1, vec![&new_key])
+        //     .unwrap();
 
         let tree1 = bonsai_storage1
             .tries
@@ -563,6 +571,8 @@ mod tests {
 
         // Calculate next root using PartialTrie
         let mut partial_trie = PartialTrie::<Pedersen>::new(identifier1.into(), height);
+        // insert a new value of an existing key (ie., new_key) into the partial trie (the partial trie is based
+        // on the proofs taken from bonsai_storage1)
         let next_root = partial_trie
             .next_root(
                 &new_key,
